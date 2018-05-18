@@ -15,11 +15,3 @@ def do_nm_minimize(f, x0,**args):
     """minimizer f via nelder-mead """
 
     return minimize(f, x0, method='Nelder-Mead',**args)
-
-import time
-def f(x):
-    time.sleep(.01)
-    return np.sum(x**2)
-
-x0=np.array([2, 2])
-res = do_nm_minimize(f,x0,tol=1E-2)

@@ -217,7 +217,7 @@ class QEvCostConstr(CostConstr):
     def __init__(self, basis, static, psi0,  interval, costfn):
         """
         psi0 = initial state, np array
-        H = quspin hamiltonian
+        static = static_opstr_array
         interval = interval of time evolution.
         costfn:  some function that takes a D x Nt array of evolved states as input (D being the dimensionality) and returns a single real number which is to be minimized.
         """
@@ -304,6 +304,7 @@ class QubitZSweep(UniformFieldFidelityCC):
         basis = spin_basis_1d(1)
         UniformFieldFidelityCC.__init__(self, basis, static,psi0,interval,psi_target, 'z')
     
+  
     
 ######################
         

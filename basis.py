@@ -24,8 +24,14 @@ class Basis(object):
         f = lambda t : h(t) * g(t)
         return f
 
-    
 
+class Signal(object):
+    """ Stores one or many pulse sequences."""
+
+    def __init__(self, **sig_dict):
+        self._sig_dict = sig_dict
+        
+    
 
 class TestBasis(Basis):
     """Used just to check that the minimization routine actually works.
@@ -37,7 +43,6 @@ class TestBasis(Basis):
     
     def set_init_params(self):
         self._init_params= np.random.rand(self.N)        
-
 
 class RandomFourierBasis(Basis):
     """A basis of (real) fourier modes over a fixed time interval.

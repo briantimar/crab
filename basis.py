@@ -102,7 +102,7 @@ class RandomFourierBasis(Basis):
     _bc_enforcement_types=['sine']        
 
 
-    def __init__(self, Nmode, T, rscaling=1.0,bc='none', bc_enforcement = 'sine'):
+    def __init__(self, Nmode, T, rscaling=1.0,bc='none', bc_enforcement = 'sine', label=None):
         """Nmode = number of frequencies to allow
             T = the fundamental period.  The time-domain function is defined on [0, T]
             rscaling = magnitude of the fluctuation allowed in the frequencies
@@ -137,10 +137,11 @@ class RandomFourierBasis(Basis):
         self.amplitudes = None       
         self._init_params = None
         #labels the operator this basis will couple to
-        self.label=None
+        self.label=label
         self.bc=bc
         self.bc_enforcement = bc_enforcement
         assert len(self.shape)==1
+        
         
     def set_label(self, k):
         """Assign opstr label. This should match one of the labels of the cConstr it's passed to."""
@@ -268,22 +269,23 @@ class RandomFourierBasis(Basis):
 class MultipleSignalBasis(object):
     """A container for multiple pulse sequences, each of which uses the same basis type."""
     
-    def __init__(self, basis_dict):
+    def __init__(self, **basis_dict):
         """ basis_dict: a dictionary mapping descriptive keys (can be anything) to basis objects."""
         self._basis_dict = basis_dict
         self._keys = list(basis_dict.keys())
+        self._basis_list = list(basis_dict.values())
         self._nsig = len(basis_dict)
         #total number of parameters
-        self._nparam_list = [ basis.N for basis in self._basis_dict]
+        self._nparam_list = [ basis.N for basis in self._basis_list]
         self._nparam = sum(self._nparam_list)
-        self._basis_list = list(basis_dict.vals())
+        
         
     def _split_params(self, params):
         """ Given a 1d param array, returns a dictionary mapping keys in self._keys to appropriate sub-arrays of the provided param array.
              Default behavior is to just pass them to them to the various bases in the order determined by self._keys."""
         sp=dict()
         q=0
-        if len(params) != self._param:
+        if len(params) != self._nparam:
             raise ValueError("incorrect number of parameters")
         for i in range(len(self._keys)):
             sp[self._keys[i]] = params[q:q+self._nparam_list[i]]
@@ -316,11 +318,17 @@ class MultipleSignalBasis(object):
         for k in self._keys:
             self.get_basis(k).initialize()
             
+    def copy(self):
+        """returns new MSB by copying each individual basis."""
+        bdict = dict([b.copy() for b in self._b_basis_list])
+        return MultipleSignalBasis(**bdict)        
+    
     def get_init_params(self):
         """Return the full 1d vector of params which is passed to scipy.optimize."""
         params = []
         for k in self._keys:
-            params += self.get_basis(k).get_init_params()
+            params += list(self.get_basis(k).get_init_params())
+        return np.array(params)
         
         
         

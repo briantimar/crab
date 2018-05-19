@@ -8,7 +8,7 @@ Created on Thu May 17 02:44:14 2018
 import numpy as np
 from quspin.operators import hamiltonian
 from scipy.integrate import quad
-
+import time
 def integrate(f, a, b):
     return quad(f, a, b)[0]
 
@@ -47,7 +47,9 @@ class CostConstr(object):
             The function that's returned is passed to the scipy optimize routine, which uses 1d arrays for all parameters"""
         
         def _cost(params):
+           
             return self.cost(basis.get_signal(sig0, params))
+            
         return _cost
 
 
@@ -185,6 +187,7 @@ class QEvolver(object):
         self._direct_solver_args = dict(Nt=Nt,dN=dN,nmax=nmax)
     
     def _evolve_direct(self,Nt=10,dN=10,nmax=5,**solver_args):
+        t=time.time()
         for __ in range(nmax):
             times = np.linspace(self.ti,self.tf,Nt)
             try:
@@ -281,6 +284,8 @@ class UniformFieldFidelityCC(QEvFidelityCC):
             The opstrs should be specified in a list at construction, and any Signal() which is passed to make_dynamic must have an exactly matching set of keys.
     
     """
+    
+    _valid_opstrs = ['+','-','x','y','z','n']
 
     def __init__(self, basis, static, psi0, interval, psi_target, coupling_opstrs):
         """ coupling_opstrs = list of the labels of the local operators to which the drive fields couple.
@@ -288,6 +293,23 @@ class UniformFieldFidelityCC(QEvFidelityCC):
                 """
         QEvFidelityCC.__init__(self, basis, static,psi0,interval,psi_target)
         self._coupling_opstrs = coupling_opstrs
+        from quspin.basis import boson_basis_1d, boson_basis_general
+        if isinstance(basis, boson_basis_1d) or isinstance(basis, boson_basis_general):
+            self._is_boson_basis=True
+        else:
+            self._is_boson_basis=False
+        
+    def _make_single_coupling(self, opstr, coupling,sig, drive_args):
+        return [opstr, coupling, sig.get_individual(opstr), drive_args ]
+    def _get_quspin_dynamic(self, opstr, coupling,sig, drive_args):
+        """if 'x' is provided to a hcb model, replace by + and -"""
+        if opstr not in UniformFieldFidelityCC._valid_opstrs:
+            raise ValueError("Invalid opstr:",opstr)
+        if opstr=='x' and self._is_boson_basis:
+            c1= ['+', coupling, sig.get_individual(opstr), drive_args ]
+            c2= ['-', coupling, sig.get_individual(opstr), drive_args ]
+            return [c1, c2]
+        return [self._make_single_coupling(opstr, coupling,sig,drive_args)]
     
     def make_dynamic(self, sig):
         """ Returns the dynamic opstr list to pass to quspin constructor.
@@ -300,7 +322,7 @@ class UniformFieldFidelityCC(QEvFidelityCC):
         coupling = [[1.0, i] for i in range(N)]
         drive_args = []
         for k in self._coupling_opstrs:
-            dynamic.append([k, coupling, sig.get_individual(k), drive_args])
+            dynamic+= self._get_quspin_dynamic(k,coupling,sig,drive_args)
         return dynamic
 
 class QubitZSweep(UniformFieldFidelityCC):

@@ -42,12 +42,12 @@ def overlap(s1,s2):
 
 class CostConstr(object):
     
-    def get_cost_function(self, h, basis):
-        """ h = initial guess for the function.
+    def get_cost_function(self, sig0, basis):
+        """ h = initial guess for the signals.
             The function that's returned is passed to the scipy optimize routine, which uses 1d arrays for all parameters"""
         
         def _cost(params):
-            return self.cost(basis.get_signal(h, params))
+            return self.cost(basis.get_signal(sig0, params))
         return _cost
 
 
@@ -233,32 +233,26 @@ class QEvCostConstr(CostConstr):
         ###  the constraint functions are allowed as inputs: f, the drive signal, and psit
         self._constraints = []
     
-    def make_dynamic(self,f):
+    def make_dynamic(self,sig):
         raise NotImplementedError("Use a subclass")
     
-    def _get_psit(self, f):
+    def _get_psit(self, sig):
         """Compute the time-evolved state."""
-        dynamic = self.make_dynamic(f)
+        dynamic = self.make_dynamic(sig)
         self._qevolver.set_dynamic(dynamic)
         return self._qevolver.get_psit()
     
-    def cost(self,f):
-        """Returns the cost of a drive signal f(t)"""
-        #compute the time-evolved state(s)
-        psit=self._get_psit(f)
+    def cost(self,sig):
+        """Returns the cost of a Signal object, which may contain multiple pulse sequences.
+        Includes primary cost plus possible additional constraint costs."""
+        
+        psit=self._get_psit(sig)
         c=self._primary_costfn(psit)
         for LM,cf in self._constraints:
-            c += LM * cf(f,psit)
+            c += LM * cf(sig,psit)
         return c
     
-    def _integral_cost(self,f, psit):
-        """Cost is defined as the time-integral of |f|^2"""
-        fsq = lambda f: np.abs(f)**2
-        return integrate(fsq, self.ti, self.tf)
     
-    def add_integral_constraint(self, lm):
-        self._constraints.append((lm, self._integral_cost))
-
     def _fidelity_cost(psit, psi_target):
         """Defines the cost as the infidelity of the final state with respect to some target."""
         return 1 - np.abs(overlap(psit[:,-1], psi_target))**2
@@ -274,25 +268,40 @@ class QEvFidelityCC(QEvCostConstr):
 
 
 class UniformFieldFidelityCC(QEvFidelityCC):
-    """Here the input pulse sequence f(t) couples to a term
-          sum_i f(t) O_i
-          in the hamiltonian, where O_i are single-site operators."""
+    """
+        Cost constructor for the case of one or more *uniform* drive fields.
+        The form of the hamiltonian is:
+            H = (static piece) + sum_k f_k(t) sum_i O_k_i
+            
+            where f_k are functions of time, 'k' is a QuSpin single-site opstr, and O_k the corresponding operator
+            Index i runs over sites.
+            Allowed values of k:
+                'z', 'n', 'x', 'y'.
+        
+            The opstrs should be specified in a list at construction, and any Signal() which is passed to make_dynamic must have an exactly matching set of keys.
+    
+    """
 
-    def __init__(self, basis, static, psi0, interval, psi_target, coupling_opstr):
-        """ coupling_opstr = the label of the local operator to which the drive field couples.
+    def __init__(self, basis, static, psi0, interval, psi_target, coupling_opstrs):
+        """ coupling_opstrs = list of the labels of the local operators to which the drive fields couple.
                 Examples: 'z', 'n', 'x'.
                 """
         QEvFidelityCC.__init__(self, basis, static,psi0,interval,psi_target)
-        self._coupling_opstr = coupling_opstr
+        self._coupling_opstrs = coupling_opstrs
     
-    def make_dynamic(self, f):
-        """ Returns the dynamic opstr list to pass to quspin constructor."""
+    def make_dynamic(self, sig):
+        """ Returns the dynamic opstr list to pass to quspin constructor.
+            sig = a Signal object"""
+        if set(sig.keys) != set(self._coupling_opstrs):
+            raise ValueError("Signal opstrs do not match those of cost constructor")
         #number of sites
+        dynamic = []
         N=self.basis.N
         coupling = [[1.0, i] for i in range(N)]
         drive_args = []
-        return [ [self._coupling_opstr, coupling, f, drive_args]]
-        
+        for k in self._coupling_opstrs:
+            dynamic.append([k, coupling, sig.get_individual(k), drive_args])
+        return dynamic
 
 class QubitZSweep(UniformFieldFidelityCC):
     """Test case. A single qubit with constant X field, variable Z field."""
@@ -302,9 +311,11 @@ class QubitZSweep(UniformFieldFidelityCC):
         static = [['x', [[Omega, 0]]]]
         from quspin.basis import spin_basis_1d
         basis = spin_basis_1d(1)
-        UniformFieldFidelityCC.__init__(self, basis, static,psi0,interval,psi_target, 'z')
+        UniformFieldFidelityCC.__init__(self, basis, static,psi0,interval,psi_target, ['z'])
     
-  
+
+
+
     
 ######################
         
@@ -322,13 +333,13 @@ class Trial(object):
     
     _methods = ['Nelder-Mead']
     
-    def __init__(self, basis, C, h, **opt_args):
+    def __init__(self, basis, C, sig0, **opt_args):
         """C = the cost function
-            h = zeroth-order pulse sequence
+            h = zeroth-order signal
             opt_args = args for the scipy optimizer"""
         self.basis = basis
         self.C=C
-        self.h=h
+        self.sig0 =sig0
         self.opt_args = opt_args
       
     def do_minimize(self, method='Nelder-Mead'):
@@ -338,21 +349,21 @@ class Trial(object):
         #starting params
         x0 = self.basis.get_init_params()
         #the function which nm attempts to minimize
-        f = self.C.get_cost_function(self.h, self.basis)
+        f = self.C.get_cost_function(self.sig0, self.basis)
         return do_nm_minimize(f, x0, **self.opt_args)
 
 
 class CRABOptimizer(object):
     """Holds the parameters and trials of a particular crab optimization problem"""
-    def __init__(self, cConstr, h, basis, **opt_args ):
+    def __init__(self, cConstr, sig0, basis, **opt_args ):
         """Cconstr: returns the overall cost function (including constraints) which is supposed to be minimized. Accepts as input a set of pulse sequences.
              h: zeroth-order guess for the pulse sequences
              basis: object containing list of basis functions which are specified by some finite number of params
              """
         self.cConstr = cConstr
-        self.h=h
+        self.sig0=sig0
         self.basis=basis
-        self.trial = Trial(basis,cConstr,h,**opt_args)
+        self.trial = Trial(basis,cConstr,sig0,**opt_args)
         self.opt_args = opt_args   
         
     def do_trial(self):

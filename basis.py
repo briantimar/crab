@@ -14,23 +14,68 @@ class Basis(object):
         if self._init_params is None:
             raise ValueError("Params have not been initialized!")
         return self._init_params
-
     
-    def get_signal(self, h,params):
-        """ Returns the actual time-signal f(t) which is fed to the cost function"""
+    def get_full_time_function(self, h,params):
+        """ Returns the actual time-signal f(t) which is fed to the cost function.
+             Currently, this is h(t) * g(t), where g is returned by get_time_function
+             
+             h(t): the zeroth-order time function."""
         if params.ndim != 1:
                 raise ValueError("expecting 1d param array")
         g = self.get_time_function(params)
         f = lambda t : h(t) * g(t)
         return f
 
+    def get_signal(self, sig0, params):
+        """ Returns a Signal() object wrapping the requested time function.
+        sig0 = Signal containg zeroth-order pulse seqeunce.
+        """
+        
+        if len(sig0.keys) !=1:
+            raise ValueError("Individual Basis() can only accept one time-profile.")
+        try:
+            if sig0.keys[0] != self.label:
+                print(sig0.keys[0], self.label)
+                raise ValueError("input Signal does not match label of this basis.")
+        except AttributeError:
+            raise ValueError("Can't create Signal without labeling this basis")
+        h = sig0.get_individual(self.label)
+        f=self.get_full_time_function(h,params)
+        sd=dict()
+        if self.label is None:
+            raise ValueError("Can't create Signal without labeling this basis")
+        sd[self.label] = f
+    
+                
+        return Signal(**sd)
+
 
 class Signal(object):
     """ Stores one or many pulse sequences."""
 
     def __init__(self, **sig_dict):
+        """The dictionary should map signal label strings to time-functions."""
         self._sig_dict = sig_dict
+        self._keys = list(sig_dict.keys())
         
+    def add_individual(self,k, sig):
+        """Add a label k and corresponding time-function"""
+        self._sig_dict[k] = sig
+        self._keys.append(k)
+        
+    def get_individual(self,k):
+        """ Return an individual time-function"""
+        return self._sig_dict[k]
+    
+    @property
+    def keys(self):
+        return self._keys
+    
+    def join(self, signal):
+        """Pull in signals from another signal object."""
+        for k in signal.keys:
+            self.add_individual(k, signal.get_individual(k))
+            self._keys.append(k)
     
 
 class TestBasis(Basis):
@@ -91,10 +136,15 @@ class RandomFourierBasis(Basis):
         self._frequencies=None
         self.amplitudes = None       
         self._init_params = None
-        
+        #labels the operator this basis will couple to
+        self.label=None
         self.bc=bc
         self.bc_enforcement = bc_enforcement
         assert len(self.shape)==1
+        
+    def set_label(self, k):
+        """Assign opstr label. This should match one of the labels of the cConstr it's passed to."""
+        self.label =k
         
     def _set_randomized_frequencies(self):
         ### add a random value to all the nonzero frequencies
@@ -116,9 +166,11 @@ class RandomFourierBasis(Basis):
         self._frequencies = f
         
     def copy(self):
+        """Return a copy of this basis, with the same label and frequencies."""
         b= RandomFourierBasis(self.Nmode, self.T, rscaling=self.rscaling,bc=self.bc, bc_enforcement =self.bc_enforcement)
         if self.get_frequencies() is not None:
             b.set_frequencies(self.get_frequencies())
+        b.set_label(self.label)
         return b
     
     
@@ -211,4 +263,70 @@ class RandomFourierBasis(Basis):
         def time_fn(t):
             return self.eval_time_fn(params, t)
         return time_fn
+    
+    
+class MultipleSignalBasis(object):
+    """A container for multiple pulse sequences, each of which uses the same basis type."""
+    
+    def __init__(self, basis_dict):
+        """ basis_dict: a dictionary mapping descriptive keys (can be anything) to basis objects."""
+        self._basis_dict = basis_dict
+        self._keys = list(basis_dict.keys())
+        self._nsig = len(basis_dict)
+        #total number of parameters
+        self._nparam_list = [ basis.N for basis in self._basis_dict]
+        self._nparam = sum(self._nparam_list)
+        self._basis_list = list(basis_dict.vals())
+        
+    def _split_params(self, params):
+        """ Given a 1d param array, returns a dictionary mapping keys in self._keys to appropriate sub-arrays of the provided param array.
+             Default behavior is to just pass them to them to the various bases in the order determined by self._keys."""
+        sp=dict()
+        q=0
+        if len(params) != self._param:
+            raise ValueError("incorrect number of parameters")
+        for i in range(len(self._keys)):
+            sp[self._keys[i]] = params[q:q+self._nparam_list[i]]
+            q+=self._nparam_list[i]
+        return sp
+    
+    def get_basis(self, k):
+        return self._basis_dict[k]
+    
+    def _gen_signals(self, sig_trial, param_split_dict):
+        """ Given a Signal() sig_trial, and param dictionary, the corresponding time functions are computed from each Basis, and returned in a new Signal()."""
+        sigs = Signal()
+        for k in self._keys:
+            params = param_split_dict[k]
+            h = sig_trial.get_individual(k)
+            sigs.add_individual(k, self.get_basis(k).get_full_time_function(h, params))
+        return sigs
+    
+    def get_signal(self,sig_trial, params):
+        """ Return, for a given set of params, corresponding signals from all bases.
+            params: a single, one-dimensional numpy array which contains params for *all* bases.
+            sig_trial: a Signal() object containing the trial pulse shapes"""
+        if set(sig_trial.keys) != set(self._keys):
+            raise ValueError("Signal labels do not match this MultipleSignalBasis.")
+        params_split = self._split_params(params)
+        return self._gen_signals(sig_trial, params_split)
+        
+    def initialize(self):
+        """Initialize each Basis"""
+        for k in self._keys:
+            self.get_basis(k).initialize()
+            
+    def get_init_params(self):
+        """Return the full 1d vector of params which is passed to scipy.optimize."""
+        params = []
+        for k in self._keys:
+            params += self.get_basis(k).get_init_params()
+        
+        
+        
+        
+        
+    
+    
+    
     

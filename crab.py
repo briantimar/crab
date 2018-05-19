@@ -323,7 +323,7 @@ class UniformFieldFidelityCC(QEvFidelityCC):
         drive_args = []
         for k in self._coupling_opstrs:
             dynamic+= self._get_quspin_dynamic(k,coupling,sig,drive_args)
-        print(dynamic)
+        
         return dynamic
 
 class QubitZSweep(UniformFieldFidelityCC):

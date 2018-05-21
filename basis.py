@@ -102,9 +102,10 @@ class RandomFourierBasis(Basis):
     _bc_enforcement_types=['sine']        
 
 
-    def __init__(self, Nmode, T, rscaling=1.0,bc='none', bc_enforcement = 'sine', label=None):
+    def __init__(self, Nmode, ti, tf, rscaling=1.0,bc='none', bc_enforcement = 'sine', label=None):
         """Nmode = number of frequencies to allow
-            T = the fundamental period.  The time-domain function is defined on [0, T]
+        ti, tf: initial/final endpoints defining the interval of evolution
+            T = the fundamental period = tf - ti
             rscaling = magnitude of the fluctuation allowed in the frequencies
             bc = what boundary conditions the time-domain function has to satisfy.
                 Possible values:
@@ -125,8 +126,11 @@ class RandomFourierBasis(Basis):
         self.Nmode = Nmode
         #number of params ( 1 DC value + 2 * (Nmode -1) nonzero-freq amplitudes)
         self.N = 2 * Nmode -1 
+        self.ti=ti
+        self.tf=tf
+        assert tf > ti
         #interval of evolution
-        self.T = T
+        self.T = tf - ti
         #shape of parameter array
         self.shape = (self.N,)    
         #amplitude of frequency fluctuations
@@ -168,7 +172,7 @@ class RandomFourierBasis(Basis):
         
     def copy(self):
         """Return a copy of this basis, with the same label and frequencies."""
-        b= RandomFourierBasis(self.Nmode, self.T, rscaling=self.rscaling,bc=self.bc, bc_enforcement =self.bc_enforcement)
+        b= RandomFourierBasis(self.Nmode, self.ti, self.tf, rscaling=self.rscaling,bc=self.bc, bc_enforcement =self.bc_enforcement, label=self.label)
         if self.get_frequencies() is not None:
             b.set_frequencies(self.get_frequencies())
         b.set_label(self.label)
@@ -230,7 +234,7 @@ class RandomFourierBasis(Basis):
 
     def _get_enforcer(self):
         if self.bc_enforcement == 'sine':
-            return lambda t: np.sin(np.pi * t / (self.T))
+            return lambda t: np.sin(np.pi * (t-self.ti) / (self.T))
         else:
             raise NotImplementedError
     
@@ -320,7 +324,9 @@ class MultipleSignalBasis(object):
             
     def copy(self):
         """returns new MSB by copying each individual basis."""
-        bdict = dict([b.copy() for b in self._b_basis_list])
+        bdict = dict()
+        for k in self._keys:
+            bdict[k] = self._basis_dict[k].copy()
         return MultipleSignalBasis(**bdict)        
     
     def get_init_params(self):

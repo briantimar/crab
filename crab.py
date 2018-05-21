@@ -167,7 +167,7 @@ class QEvolver(object):
     def set_hamiltonian(self):
         """Assigns hamiltonian to be used for each evolution. Need not be hermitian.
         """
-        self._H=hamiltonian(self._static, self._dynamic, basis=self._basis)
+        self._H=hamiltonian(self._static, self._dynamic, basis=self._basis, check_herm=False)
     
     def get_hamiltonian(self):
         if self._has_altered_hamiltonian:

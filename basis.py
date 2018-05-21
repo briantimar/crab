@@ -4,7 +4,7 @@
 Basis types for CRAB. Only a fourier basis currently.
 """
 import numpy as np
-
+from scipy.interpolate import interp1d
 class Basis(object):
     
     def __init__(self):
@@ -17,12 +17,12 @@ class Basis(object):
     
     def get_full_time_function(self, h,params):
         """ Returns the actual time-signal f(t) which is fed to the cost function.
-             Currently, this is h(t) * g(t), where g is returned by get_time_function
+             Currently, this is h(t) * g(t), where g is returned by _get_time_function
              
              h(t): the zeroth-order time function."""
         if params.ndim != 1:
                 raise ValueError("expecting 1d param array")
-        g = self.get_time_function(params)
+        g = self._get_time_function(params)
         f = lambda t : h(t) * g(t)
         return f
 
@@ -102,7 +102,7 @@ class RandomFourierBasis(Basis):
     _bc_enforcement_types=['sine']        
 
 
-    def __init__(self, Nmode, ti, tf, rscaling=1.0,bc='none', bc_enforcement = 'sine', label=None):
+    def __init__(self, Nmode, ti, tf, rscaling=1.0,bc='none', bc_enforcement = 'sine', eval_method='precomp', Nprecomp=10000, interp_method='linear', label=None):
         """Nmode = number of frequencies to allow
         ti, tf: initial/final endpoints defining the interval of evolution
             T = the fundamental period = tf - ti
@@ -115,7 +115,9 @@ class RandomFourierBasis(Basis):
                     'unit' --> the function must equal 1 at t=0, T. 
                           f = (bc enf) * (sum of sinusoids) + 1
             bc_enforcement: how the boundary conditions are enforced. Allowed values:
-                    'sine' """
+                    'sine' 
+            eval_method: how values of the time function are computed on demand. Allowed values:
+                    'direct', 'precomp' """
                   
         if bc not in RandomFourierBasis._bc_types:
             raise NotImplementedError
@@ -144,7 +146,23 @@ class RandomFourierBasis(Basis):
         self.label=label
         self.bc=bc
         self.bc_enforcement = bc_enforcement
+        if eval_method not in ['direct', 'precomp']:
+            raise ValueError("Not a valid evaluation method.")
+        self.eval_method = eval_method
         assert len(self.shape)==1
+        
+        #precomputed values of the current time-function
+        self._interp_vals = None
+        #time values for interpolation
+        self._interp_times = None
+        #how many interp values to precompute
+        self.Nprecomp = Nprecomp
+        #what kind of interpolation to use. See scipt.interpolate.interp1d for details
+        self.interp_method = interp_method
+        
+        if self.eval_method =='precomp':
+            self._gen_interp_times()
+     
         
         
     def set_label(self, k):
@@ -221,6 +239,30 @@ class RandomFourierBasis(Basis):
         M[self.Nmode:, :] = np.sin(phi[1:,:])
         return M
     
+    def _comp_basis_only(self, params, times):
+        """ Compute the value of the summed basis functions without applying bc's or the trial pulse"""
+        M = self._gen_sinusoid_matrix(times)
+        assert M.shape[0] == self.N
+        Nt=M.shape[1]
+        params = params.reshape((self.N,1)).repeat(Nt,axis=1)
+        f_evaluated= np.sum(M*params,axis=0)
+        assert (f_evaluated.ndim==1) and len(f_evaluated)==Nt 
+        return f_evaluated        
+        
+    def _get_all_values(self, params, times):
+        """ Return sampling of the time-function specified by the current basis, params, and boundary conditions.
+        Does not know about the 'guess' pulse."""
+        return self._apply_bc(self._comp_basis_only(params,times), times)
+        
+    def _gen_interp_times(self):
+        """Compute and store values at interpolation points."""
+        self._interp_times = np.linspace(self.ti, self.tf, self.Nprecomp)
+    
+    def _gen_interp_vals(self,params):
+        if self._interp_times is None:
+            self._gen_interp_times()
+        self._interp_vals = self._get_all_values(params,self._interp_times)
+    
     def _apply_bc(self, f_eval, t):
         if self.bc=='none':
             return f_eval
@@ -244,9 +286,12 @@ class RandomFourierBasis(Basis):
     def _enforce_unit_bc(self, f_eval, t, enforcer):
         return 1.0 + self._enforce_zero_bc( f_eval, t, enforcer)
     
-    def eval_time_fn(self, params, t):
-        """ Using the specified params as amplitudes, compute the time-values.
-        t = a scalar or 1d numpy array"""
+    
+    def _eval_time_fn(self, params, t):
+        """ Using the specified params as amplitudes, compute the time-values directly.
+        t = a scalar or 1d numpy array.
+        
+            Note that this re-computes the fourier matrix, sums, etc at each timestep."""
         if params.shape != self.shape:
             raise ValueError("Param array has wrong shape")
         M = self._gen_sinusoid_matrix(t)
@@ -262,13 +307,25 @@ class RandomFourierBasis(Basis):
             return f_evaluated[0]
         return f_evaluated
     
-    def get_time_function(self, params):
-        """ Given a particular set of params, return the associated function of time.
-        t is allowed to be an array of times."""
-        def time_fn(t):
-            return self.eval_time_fn(params, t)
-        return time_fn
     
+    def _get_time_function(self, params):
+        """ Given a particular set of params, return the associated function of time (specified by the current basis, the params, and the bc's)
+        t is allowed to be an array of times.
+        Method: how the function works under the hood.
+              'direct' ---> every time it's passed a time value, it constructs the fourier matrix, sums it, applys bc's -- in other words computes time-fn exactly from scratch.
+              'precomp' ---> values are precomputed beforehand on some grid. then the returned function just interpolates.
+        """
+    
+        if self.eval_method=='direct':
+            def time_fn(t):
+                return self._eval_time_fn(params, t)
+            return time_fn
+        if self.eval_method =='precomp':
+            self._gen_interp_vals(params)             
+            # turn off bounds error b/c quspin uses a particular 'test point' for the dynmamic fn which may fall outside fitting range.
+            return interp1d(self._interp_times, self._interp_vals, kind=self.interp_method, bounds_error=False, fill_value="extrapolate")
+
+
     
 class MultipleSignalBasis(object):
     """A container for multiple pulse sequences, each of which uses the same basis type."""

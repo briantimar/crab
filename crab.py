@@ -103,7 +103,7 @@ class QEvolver(object):
         """
     _methods = ['direct']
     
-    def __init__(self, basis, static=None, psi0=None, interval=None):
+    def __init__(self, basis, static=None, psi0=None, interval=None,verbose=False):
         """ basis: the quspin basis object used to construct the hamiltonian
            static: static opstr list for the hamiltonian
            psi: initial state
@@ -124,6 +124,7 @@ class QEvolver(object):
         ### hamiltonian
         self._H = None
         self._has_altered_hamiltonian=False
+        self.verbose=verbose
         
         self._direct_solver_args = dict(Nt=10, dN=10, nmax=5)
         if static is not None:
@@ -187,12 +188,14 @@ class QEvolver(object):
         self._direct_solver_args = dict(Nt=Nt,dN=dN,nmax=nmax)
     
     def _evolve_direct(self,Nt=10,dN=10,nmax=5,**solver_args):
-        t=time.time()
         for __ in range(nmax):
             times = np.linspace(self.ti,self.tf,Nt)
             try:
                 H=self.get_hamiltonian()
+                t=time.time()
                 psit= H.evolve(self._psi0, self.ti,times,**solver_args)
+                if self.verbose:
+                    print("evolve time",time.time() -t)
                 self._set_psit(psit)
                 return
             except RuntimeError:
@@ -217,7 +220,7 @@ class QEvolver(object):
 class QEvCostConstr(CostConstr):
     """Defines a cost function based on some quantum evolution."""
     
-    def __init__(self, basis, static, psi0,  interval, costfn):
+    def __init__(self, basis, static, psi0,  interval, costfn,verbose=False):
         """
         psi0 = initial state, np array
         static = static_opstr_array
@@ -225,7 +228,7 @@ class QEvCostConstr(CostConstr):
         costfn:  some function that takes a D x Nt array of evolved states as input (D being the dimensionality) and returns a single real number which is to be minimized.
         """
         self.basis=basis
-        self._qevolver = QEvolver(basis,static,psi0,interval)
+        self._qevolver = QEvolver(basis,static,psi0,interval,verbose=verbose)
         self._primary_costfn = costfn
         self._interval = interval
         self.ti = interval[0]
@@ -264,10 +267,10 @@ class QEvCostConstr(CostConstr):
 class QEvFidelityCC(QEvCostConstr):
     """ Returns a cost function based on infidelity with a particular target state"""
     
-    def __init__(self, basis, static, psi0, interval, psi_target):
+    def __init__(self, basis, static, psi0, interval, psi_target,verbose=False):
         primary_cost_fn = lambda psit: QEvCostConstr._fidelity_cost(psit, psi_target)
         self.psi_target = psi_target
-        QEvCostConstr.__init__(self, basis, static, psi0, interval, primary_cost_fn)
+        QEvCostConstr.__init__(self, basis, static, psi0, interval, primary_cost_fn,verbose=verbose)
 
 
 class UniformFieldFidelityCC(QEvFidelityCC):
@@ -287,18 +290,18 @@ class UniformFieldFidelityCC(QEvFidelityCC):
     
     _valid_opstrs = ['+','-','x','y','z','n']
 
-    def __init__(self, basis, static, psi0, interval, psi_target, coupling_opstrs):
+    def __init__(self, basis, static, psi0, interval, psi_target, coupling_opstrs, verbose=False):
         """ coupling_opstrs = list of the labels of the local operators to which the drive fields couple.
                 Examples: 'z', 'n', 'x'.
                 """
-        QEvFidelityCC.__init__(self, basis, static,psi0,interval,psi_target)
+        QEvFidelityCC.__init__(self, basis, static,psi0,interval,psi_target,verbose=verbose)
         self._coupling_opstrs = coupling_opstrs
         from quspin.basis import boson_basis_1d, boson_basis_general
         if isinstance(basis, boson_basis_1d) or isinstance(basis, boson_basis_general):
             self._is_boson_basis=True
         else:
             self._is_boson_basis=False
-        
+        self.verbose=verbose
     def _make_single_coupling(self, opstr, coupling,sig, drive_args):
         return [opstr, coupling, sig.get_individual(opstr), drive_args ]
     def _get_quspin_dynamic(self, opstr, coupling,sig, drive_args):
@@ -325,6 +328,9 @@ class UniformFieldFidelityCC(QEvFidelityCC):
             dynamic+= self._get_quspin_dynamic(k,coupling,sig,drive_args)
         
         return dynamic
+
+    def set_direct_solver_args(self, Nt, dN, nmax):
+        self._qevolver.set_direct_solver_args(Nt, dN, nmax)
 
 class QubitZSweep(UniformFieldFidelityCC):
     """Test case. A single qubit with constant X field, variable Z field."""

@@ -432,7 +432,7 @@ class CRABOptimizer(object):
             (best basis, best params, best cost)
         
         """
-        best_basis = None
+        best_freqs = None
         best_cost =None
         best_params = None 
         costs_per_trial = []
@@ -444,8 +444,10 @@ class CRABOptimizer(object):
             if best_cost is None or (res.fun < best_cost):
                 best_cost = res.fun
                 best_params = res.x
-                best_basis = self.basis.copy()
-        return (best_basis, best_params, best_cost, costs_per_trial)
+                best_freqs = self.basis.get_frequencies()
+        #having found the best fourier basis, assign it and return
+        self.basis.set_frequencies(best_freqs)
+        return (self.basis, best_params, best_cost, costs_per_trial)
         
         
         

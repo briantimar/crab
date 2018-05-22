@@ -23,7 +23,12 @@ class Basis(object):
         if params.ndim != 1:
                 raise ValueError("expecting 1d param array")
         g = self._get_time_function(params)
-        f = lambda t : h(t) * g(t)
+        def f(t):
+            f0 = h(t) * g(t)
+            #apply constraints, if any
+            for c in self._constraints.values():
+                f0 = c(f0)
+            return f0
         return f
 
     def get_signal(self, sig0, params):
@@ -164,6 +169,8 @@ class RandomFourierBasis(Basis):
         if self.eval_method =='precomp':
             self._gen_interp_times()
      
+        ###stores all constraints to be applied to the output function
+        self._constraints={}
         
         
     def set_label(self, k):
@@ -183,19 +190,21 @@ class RandomFourierBasis(Basis):
     
     def set_frequencies(self,f):
         """Set the frequencies by hand -- only allowed if a random set hasn't already been generated"""
-        if self._frequencies is not None:
-            print("Can't set frequencies after random initialization")
-            return
+#        if self._frequencies is not None:
+#            print("Can't set frequencies after random initialization")
+#            return
         if len(f) != self.Nmode:
             raise ValueError("Number of frequencies should match Nmode")
         self._frequencies = f
         
     def copy(self):
-        """Return a copy of this basis, with the same label and frequencies."""
+        """Return a copy of this basis, with the same label and frequencies"""
+        raise NotImplementedError
         b= RandomFourierBasis(self.Nmode, self.ti, self.tf, rscaling=self.rscaling,bc=self.bc, bc_enforcement =self.bc_enforcement, label=self.label)
         if self.get_frequencies() is not None:
             b.set_frequencies(self.get_frequencies())
         b.set_label(self.label)
+        
         return b
     
     
@@ -288,6 +297,14 @@ class RandomFourierBasis(Basis):
     def _enforce_unit_bc(self, f_eval, t, enforcer):
         return 1.0 + self._enforce_zero_bc( f_eval, t, enforcer)
     
+    def _apply_max_constraint(self, f_eval, maxval):
+        """Forces the output to saturate at maxval when feval>maxval"""
+        try:
+            return (f_eval<maxval)*f_eval + (f_eval>=maxval) * maxval * np.ones(len(f_eval))
+        except TypeError:
+            return max(f_eval, maxval)
+    def add_max_constraint(self, maxval):
+        self._constraints['max'] = lambda f: self._apply_max_constraint(f, maxval)
     
     def _eval_time_fn(self, params, t):
         """ Using the specified params as amplitudes, compute the time-values directly.
@@ -304,6 +321,7 @@ class RandomFourierBasis(Basis):
         assert (f_evaluated.ndim==1) and len(f_evaluated)==Nt 
         #apply boundary conditions, if any
         f_evaluated = self._apply_bc(f_evaluated, t)
+
         #return a scalar if provided a scalar
         if Nt==1:
             return f_evaluated[0]
@@ -396,6 +414,18 @@ class MultipleSignalBasis(object):
         return np.array(params)
         
         
+    def get_frequencies(self):
+        """ Returns dict mapping basis labels to their frequencies"""
+        fd=dict()
+        for k in self._keys:
+            fd[k] = self.get_basis(k).get_frequencies()
+        return fd
+    
+    def set_frequencies(self, fdict):
+        """ Assign frequencies to each individual basis through a dictionary"""
+        for k in fdict.keys():
+            self.get_basis(k).set_frequencies(fdict[k])
+    
         
         
         

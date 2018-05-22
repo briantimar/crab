@@ -151,6 +151,7 @@ class RandomFourierBasis(Basis):
         self.eval_method = eval_method
         assert len(self.shape)==1
         
+        
         #precomputed values of the current time-function
         self._interp_vals = None
         #time values for interpolation
@@ -170,7 +171,8 @@ class RandomFourierBasis(Basis):
         self.label =k
         
     def _set_randomized_frequencies(self):
-        ### add a random value to all the nonzero frequencies
+        """Assigns randomized frequencies to the basis. Updates the sinusoid matrix"""
+    
         r = (np.random.rand(self.Nmode-1) - 0.5) * self.rscaling
         self._frequencies = self.harmonics.copy()
         self._frequencies[1:] += self.omega_base * r
@@ -242,11 +244,11 @@ class RandomFourierBasis(Basis):
     def _comp_basis_only(self, params, times):
         """ Compute the value of the summed basis functions without applying bc's or the trial pulse"""
         M = self._gen_sinusoid_matrix(times)
-        assert M.shape[0] == self.N
+
         Nt=M.shape[1]
         params = params.reshape((self.N,1)).repeat(Nt,axis=1)
         f_evaluated= np.sum(M*params,axis=0)
-        assert (f_evaluated.ndim==1) and len(f_evaluated)==Nt 
+
         return f_evaluated        
         
     def _get_all_values(self, params, times):

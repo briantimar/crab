@@ -190,6 +190,7 @@ class QEvolver(object):
     def _evolve_direct(self,Nt=10,dN=10,nmax=5,**solver_args):
         for __ in range(nmax):
             times = np.linspace(self.ti,self.tf,Nt)
+
             try:
                 H=self.get_hamiltonian()
                 t=time.time()
@@ -302,6 +303,30 @@ class UniformFieldFidelityCC(QEvFidelityCC):
         else:
             self._is_boson_basis=False
         self.verbose=verbose
+        
+        #previously computed cost values
+        self._costs_recorded = []        
+    
+    
+    def get_cost_function(self, sig0, basis):
+        """ 
+            Overwrites the default get_cost_function. when called the cost value is recorded
+        h = initial guess for the signals.
+            The function that's returned is passed to the scipy optimize routine, which uses 1d arrays for all parameters"""
+        
+        def _cost(params):
+            c= self.cost(basis.get_signal(sig0, params))
+            self._costs_recorded.append(c)
+            return c
+            
+        return _cost
+    
+    def _reset_costs(self):
+        self._costs_recorded=[]
+    def _get_costs(self):
+        return self._costs_recorded.copy()
+        
+    
     def _make_single_coupling(self, opstr, coupling,sig, drive_args):
         return [opstr, coupling, sig.get_individual(opstr), drive_args ]
     def _get_quspin_dynamic(self, opstr, coupling,sig, drive_args):
@@ -409,15 +434,18 @@ class CRABOptimizer(object):
         """
         best_basis = None
         best_cost =None
-        best_params = None
+        best_params = None 
+        costs_per_trial = []
         for __ in range(Ntrial):
+            self.cConstr._reset_costs()
             res=self.do_trial()
+            costs_per_trial.append(self.cConstr._get_costs())
             ##final cost value
             if best_cost is None or (res.fun < best_cost):
                 best_cost = res.fun
                 best_params = res.x
                 best_basis = self.basis.copy()
-        return (best_basis, best_params, best_cost)
+        return (best_basis, best_params, best_cost, costs_per_trial)
         
         
         

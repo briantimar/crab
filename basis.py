@@ -107,7 +107,7 @@ class RandomFourierBasis(Basis):
     _bc_enforcement_types=['sine']        
 
 
-    def __init__(self, Nmode, ti, tf, rscaling=1.0,bc='none', bc_enforcement = 'sine', eval_method='precomp', Nprecomp=10000, interp_method='linear', label=None):
+    def __init__(self, Nmode, ti, tf, rscaling=1.0,bc='none', bc_enforcement = 'sine', eval_method='precomp', Nprecomp=10000, interp_method='linear', label=None, omega_base = None):
         """Nmode = number of frequencies to allow
         ti, tf: initial/final endpoints defining the interval of evolution
             T = the fundamental period = tf - ti
@@ -122,7 +122,9 @@ class RandomFourierBasis(Basis):
             bc_enforcement: how the boundary conditions are enforced. Allowed values:
                     'sine' 
             eval_method: how values of the time function are computed on demand. Allowed values:
-                    'direct', 'precomp' """
+                    'direct', 'precomp'
+                    
+        omega_base: what to use as the fundamental freqeuency. Default is 2pi / T"""
                   
         if bc not in RandomFourierBasis._bc_types:
             raise NotImplementedError
@@ -142,7 +144,10 @@ class RandomFourierBasis(Basis):
         self.shape = (self.N,)    
         #amplitude of frequency fluctuations
         self.rscaling=rscaling
-        self.omega_base = 2 * np.pi / self.T
+        if omega_base is None:
+            self.omega_base = 2 * np.pi / self.T
+        else:
+            self.omega_base = omega_base
         self.harmonics = np.array([ self.omega_base * k for k in range(0, self.Nmode)])
         self._frequencies=None
         self.amplitudes = None       
